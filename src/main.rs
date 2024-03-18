@@ -2,8 +2,28 @@ pub struct  CPU {
     pub program_counter: u16,
     pub register_a: u8,
     pub register_x: u8,
+    pub register_y: u8,
     pub status: u8,
     memory: [u8; 0xFFFF]
+}
+
+
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub enum AddressingMode {
+   Accumulator,
+   Immediate,
+   ZeroPage,
+   ZeroPage_X,
+   ZeroPage_Y,
+   Relative,
+   Absolute,
+   Absolute_X,
+   Absolute_Y,
+   Indirect,
+   Indirect_X,
+   Indirect_Y,
+   Implicit
 }
 
 impl Default for CPU {
@@ -17,6 +37,7 @@ impl CPU {
         CPU {
             register_a: 0,
             register_x: 0,
+            register_y: 0,
             status: 0,
             program_counter: 0,
             memory: [0; 0xFFFF],
@@ -68,6 +89,67 @@ impl CPU {
         self.memory[0x8000 .. (0x8000 + program.len())]
             .copy_from_slice(&program[..]);
         self.mem_write_u16(0xFFFC, 0x8000);
+    }
+
+    fn get_address(&mut self, addressing_mode: &AddressingMode) -> Option<u16> {
+        let address: Option<u16>;
+        match addressing_mode {
+            AddressingMode::Implicit => address = None,
+            AddressingMode::Immediate => address = Some(self.program_counter),
+            AddressingMode::ZeroPage => {
+                address = Some(self.mem_read(self.program_counter) as u16);
+                self.program_counter += 1;
+            },
+            AddressingMode::ZeroPage_X => {
+                address = Some(self.mem_read(self.program_counter)
+                    .wrapping_add(self.register_x) as u16);
+                self.program_counter += 1;
+            },
+            AddressingMode::ZeroPage_Y => {
+                address = Some(self.mem_read(self.program_counter)
+                    .wrapping_add(self.register_y) as u16);
+                self.program_counter += 1;
+            },
+            AddressingMode::Relative => {
+                address = Some(self.program_counter.wrapping_add(
+                    self.mem_read(self.program_counter) as u16
+                ));
+                self.program_counter += 1;
+            },
+            AddressingMode::Absolute => {
+                address = Some(self.mem_read_u16(self.program_counter));
+                self.program_counter += 2;
+            },
+            AddressingMode::Absolute_X => {
+                address = Some(self.mem_read_u16(self.program_counter)
+                    .wrapping_add(self.register_x as u16));
+                self.program_counter += 2;
+            },
+            AddressingMode::Absolute_Y => {
+                address = Some(self.mem_read_u16(self.program_counter)
+                    .wrapping_add(self.register_y as u16));
+                self.program_counter += 2;
+            },
+            AddressingMode::Indirect => {
+                let addr = self.mem_read_u16(self.program_counter);
+                address = Some(self.mem_read_u16(addr));
+                self.program_counter += 2;
+            },
+            AddressingMode::Indirect_X => {
+                let addr = self.mem_read(self.program_counter)
+                    .wrapping_add(self.register_x);
+                address = Some(self.mem_read_u16(addr as u16));
+                self.program_counter += 1;
+            },
+            AddressingMode::Indirect_Y => {
+                let addr = self.mem_read(self.program_counter)
+                    .wrapping_add(self.register_y);
+                address = Some(self.mem_read_u16(addr as u16));
+                self.program_counter += 1;
+            },
+            _ => todo!("finish"),
+        }
+        address
     }
     
     pub fn run(&mut self) {
@@ -233,4 +315,5 @@ use super::*;
         cpu.mem_write_u16(0xdead, 0xbeef);
         assert_eq!(0xbeef, cpu.mem_read_u16(0xdead));
     }
+
 }
