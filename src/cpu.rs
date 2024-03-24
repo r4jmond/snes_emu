@@ -1,3 +1,5 @@
+use crate::opcode::{self, OPCODES_MAP};
+
 pub struct  CPU {
     pub program_counter: u16,
     pub register_a: u8,
@@ -23,7 +25,7 @@ pub enum AddressingMode {
    Indirect,
    Indirect_X,
    Indirect_Y,
-   Implicit
+   Implied
 }
 
 impl Default for CPU {
@@ -94,7 +96,7 @@ impl CPU {
     fn get_address(&mut self, addressing_mode: &AddressingMode) -> Option<u16> {
         let address: Option<u16>;
         match addressing_mode {
-            AddressingMode::Implicit => address = None,
+            AddressingMode::Implied => address = None,
             AddressingMode::Immediate => {
                 address = Some(self.program_counter);
                 self.program_counter +=1;
@@ -178,40 +180,38 @@ impl CPU {
         self.set_flags(self.register_a);
     }
 
+    fn tax(&mut self) {
+        self.register_x = self.register_a;
+        self.set_flags(self.register_x);
+    }
+
+    fn inx(&mut self) {
+        self.register_x = self.register_x.wrapping_add(1);
+        self.set_flags(self.register_x);
+    }
+
     pub fn run(&mut self) {
         loop {
-            let opscode = self.mem_read(self.program_counter);
+            let code = self.mem_read(self.program_counter);
             self.program_counter += 1;
+            let opcode = OPCODES_MAP.get(&code);
 
-            match opscode {
-                0xA9 => self.lda(&AddressingMode::Immediate),
-                0xA5 => self.lda(&AddressingMode::ZeroPage),
-                0xB5 => self.lda(&AddressingMode::ZeroPage_X),
-                0xAD => self.lda(&AddressingMode::Absolute),
-                0xBD => self.lda(&AddressingMode::Absolute_X),
-                0xB9 => self.lda(&AddressingMode::Absolute_Y),
-                0xA1 => self.lda(&AddressingMode::Indirect_X),
-                0xB1 => self.lda(&AddressingMode::Indirect_Y),
-                0xA2 => self.ldx(&AddressingMode::Immediate),
-                0xA0 => self.ldy(&AddressingMode::Immediate),
-                0xAA => {
-                    self.register_x = self.register_a;
-                    self.set_flags(self.register_x);
+            match opcode {
+                Some(opcode) => {
+                    use opcode::CpuMnemonic::*;
+                    match &opcode.mnemonic {
+                        LDA => { self.lda(&opcode.addressing) },
+                        LDX => { self.ldx(&opcode.addressing) },
+                        LDY => { self.ldy(&opcode.addressing) },
+                        STA => { self.sta(&opcode.addressing) },
+                        TAX => { self.tax() },
+                        INX => { self.inx() },
+                        BRK => { return; }
+                    }
                 }
-                0xE8 => { 
-                    self.register_x = self.register_x.wrapping_add(1);
-                    self.set_flags(self.register_x);
-                }
-                0x85 => self.sta(&AddressingMode::ZeroPage),
-                0x95 => self.sta(&AddressingMode::ZeroPage_X),
-                0x8D => self.sta(&AddressingMode::Absolute),
-                0x9D => self.sta(&AddressingMode::Absolute_X),
-                0x99 => self.sta(&AddressingMode::Absolute_Y),
-                0x81 => self.sta(&AddressingMode::Indirect_X),
-                0x91 => self.sta(&AddressingMode::Indirect_Y),
-                0x00 => { return; },
-                _ => {todo!("Implement more opcodes!");}
+                None => { todo!("Implement more opcodes!"); }
             }
+
         }
     }
 
