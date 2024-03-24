@@ -172,6 +172,12 @@ impl CPU {
         self.set_flags(self.register_y);
     }
     
+    fn sta(&mut self, addressing_mode: &AddressingMode) {
+        let addr = self.get_address(addressing_mode).unwrap();
+        self.mem_write(addr, self.register_a);
+        self.set_flags(self.register_a);
+    }
+
     pub fn run(&mut self) {
         loop {
             let opscode = self.mem_read(self.program_counter);
@@ -196,6 +202,13 @@ impl CPU {
                     self.register_x = self.register_x.wrapping_add(1);
                     self.set_flags(self.register_x);
                 }
+                0x85 => self.sta(&AddressingMode::ZeroPage),
+                0x95 => self.sta(&AddressingMode::ZeroPage_X),
+                0x8D => self.sta(&AddressingMode::Absolute),
+                0x9D => self.sta(&AddressingMode::Absolute_X),
+                0x99 => self.sta(&AddressingMode::Absolute_Y),
+                0x81 => self.sta(&AddressingMode::Indirect_X),
+                0x91 => self.sta(&AddressingMode::Indirect_Y),
                 0x00 => { return; },
                 _ => {todo!("Implement more opcodes!");}
             }
@@ -424,6 +437,67 @@ use super::*;
         /* LDY 0x05 -> LDA 0x50 => load LDA from the (address stored at 0x50) + 0x05 */
         cpu.load_and_run(vec![0xa0, 0x05, 0xb1, 0x50, 0x00]);
         assert_eq!(cpu.register_a, 0xea);
+    }
+
+    #[test]
+    fn test_0xa5_sta_zero_page() {
+        let mut cpu = CPU::new();
+        /* LDA 0x50 -> STA 0x30 */
+        cpu.load_and_run(vec![0xa9, 0x50, 0x85, 0x30, 0x00]);
+        assert_eq!(0x50, cpu.mem_read(0x0030));
+    }
+
+    #[test]
+    fn test_0x95_sta_zero_page_x() {
+        let mut cpu = CPU::new();
+        /* LDA 0xfe -> INX -> STA 0x50 */
+        cpu.load_and_run(vec![0xa9, 0xfe, 0xe8, 0x95, 0x50, 0x00]);
+        assert_eq!(cpu.mem_read(0x51), 0xfe);
+    }
+
+    #[test]
+    fn test_0x8d_sta_absolute() {
+        let mut cpu = CPU::new();
+        /* LDA 0xbe -> STA 0xdead */
+        cpu.load_and_run(vec![0xa9, 0xbe, 0x8d, 0xad, 0xde, 0x00]);
+        assert_eq!(cpu.mem_read(0xdead), 0xbe);
+    }
+
+    #[test]
+    fn test_0x9d_sta_absolute_x() {
+        let mut cpu = CPU::new();
+        /* LDA 0xbe -> INX-> STA 0xdead */
+        cpu.load_and_run(vec![0xa9, 0xbe, 0xe8, 0x9d, 0xad, 0xde, 0x00]);
+        assert_eq!(cpu.mem_read(0xdeae), 0xbe);
+    }
+
+    #[test]
+    fn test_0x99_sta_absolute_y() {
+        let mut cpu = CPU::new();
+        /* LDA 0xbe -> LDY 0x50 -> STA 0x5000 */
+        cpu.load_and_run(vec![0xa9, 0xbe, 0xa0, 0x50, 0x99, 0x00, 0x50, 0x00]);
+        assert_eq!(cpu.mem_read(0x5050), 0xbe);
+    }
+
+    #[test]
+    fn test_0x81_sta_indirect_x() {
+        let mut cpu = CPU::new();
+        /* save address of the expected value to 0x0055 */
+        cpu.mem_write_u16(0x0055, 0xdead);
+        /* LDA 0xea -> LDX 0x05 -> STA 0x50 => load LDA to the address stored at 0x0055 */
+        cpu.load_and_run(vec![0xa9, 0xea, 0xa2, 0x05, 0x81, 0x50, 0x00]);
+        assert_eq!(cpu.mem_read(0xdead), 0xea);
+    }
+
+    #[test]
+    fn test_0x91_sta_indirect_y() {
+        let mut cpu = CPU::new();
+        /* save address of the expected value to 0x0050 */
+        cpu.mem_write_u16(0x0050, 0x5000);
+        /* LDA 0xea -> LDY 0x05 -> LDA 0x50 => load LDA to the (address stored at 0x50) + 0x05 */
+        cpu.load_and_run(vec![0xa9, 0xea, 0xa0, 0x05, 0x91, 0x50, 0x00]);
+
+        assert_eq!(cpu.mem_read(0x5005), 0xea);
     }
 
 }
