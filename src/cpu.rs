@@ -95,7 +95,10 @@ impl CPU {
         let address: Option<u16>;
         match addressing_mode {
             AddressingMode::Implicit => address = None,
-            AddressingMode::Immediate => address = Some(self.program_counter),
+            AddressingMode::Immediate => {
+                address = Some(self.program_counter);
+                self.program_counter +=1;
+            },
             AddressingMode::ZeroPage => {
                 address = Some(self.mem_read(self.program_counter) as u16);
                 self.program_counter += 1;
@@ -142,42 +145,60 @@ impl CPU {
                 self.program_counter += 1;
             },
             AddressingMode::Indirect_Y => {
-                let addr = self.mem_read(self.program_counter)
-                    .wrapping_add(self.register_y);
-                address = Some(self.mem_read_u16(addr as u16));
+                let addr = self.mem_read(self.program_counter);
+                address = Some(self.mem_read_u16(addr as u16).wrapping_add(self.register_y as u16));
                 self.program_counter += 1;
             },
             _ => todo!("finish"),
         }
         address
     }
+
+    fn lda(&mut self, addressing_mode: &AddressingMode) {
+        let addr = self.get_address(addressing_mode).unwrap();
+        self.register_a = self.mem_read(addr);
+        self.set_flags(self.register_a);
+    }
+
+    fn ldx(&mut self, addressing_mode: &AddressingMode) {
+        let addr = self.get_address(addressing_mode).unwrap();
+        self.register_x = self.mem_read(addr);
+        self.set_flags(self.register_x);
+    }
+
+    fn ldy(&mut self, addressing_mode: &AddressingMode) {
+        let addr = self.get_address(addressing_mode).unwrap();
+        self.register_y = self.mem_read(addr);
+        self.set_flags(self.register_y);
+    }
     
     pub fn run(&mut self) {
         loop {
             let opscode = self.mem_read(self.program_counter);
             self.program_counter += 1;
-            let result: u8;
 
             match opscode {
-                0xA9 => {
-                    let value = self.mem_read(self.program_counter);
-                    self.register_a = value;
-                    self.program_counter += 1;
-                    result = self.register_a;
-                }
+                0xA9 => self.lda(&AddressingMode::Immediate),
+                0xA5 => self.lda(&AddressingMode::ZeroPage),
+                0xB5 => self.lda(&AddressingMode::ZeroPage_X),
+                0xAD => self.lda(&AddressingMode::Absolute),
+                0xBD => self.lda(&AddressingMode::Absolute_X),
+                0xB9 => self.lda(&AddressingMode::Absolute_Y),
+                0xA1 => self.lda(&AddressingMode::Indirect_X),
+                0xB1 => self.lda(&AddressingMode::Indirect_Y),
+                0xA2 => self.ldx(&AddressingMode::Immediate),
+                0xA0 => self.ldy(&AddressingMode::Immediate),
                 0xAA => {
                     self.register_x = self.register_a;
-                    result = self.register_x;
+                    self.set_flags(self.register_x);
                 }
                 0xE8 => { 
                     self.register_x = self.register_x.wrapping_add(1);
-                    result = self.register_x;
+                    self.set_flags(self.register_x);
                 }
                 0x00 => { return; },
                 _ => {todo!("Implement more opcodes!");}
             }
-            self.set_flags(result);
-
         }
     }
 
@@ -191,6 +212,8 @@ impl CPU {
 
 #[cfg(test)]
 mod test {
+use std::vec;
+
 use super::*;
  
     #[test]
@@ -311,4 +334,96 @@ use super::*;
         cpu.mem_write_u16(0xdead, 0xbeef);
         assert_eq!(0xbeef, cpu.mem_read_u16(0xdead));
     }
+
+    #[test]
+    fn test_0xa2_ldx_immediate() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa2, 0xab, 0x00]);
+        assert_eq!(cpu.register_x, 0xab);
+    }
+
+    #[test]
+    fn test_0xa0_ldy_immediate() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa0, 0xab, 0x00]);
+        assert_eq!(cpu.register_y, 0xab);
+    }
+
+    #[test]
+    fn test_0xa5_lda_zero_page() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x50, 0xde);
+        cpu.load_and_run(vec![0xa5, 0x50, 0x00]);
+        assert_eq!(cpu.register_a, 0xde);
+    }
+
+    #[test]
+    fn test_0xb5_lda_zero_page_x() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x51, 0xde);
+        /* INX -> LDA 0x50 */
+        cpu.load_and_run(vec![0xe8, 0xb5, 0x50, 0x00]);
+        assert_eq!(cpu.register_a, 0xde);
+    }
+
+    #[test]
+    fn test_0xb5_lda_zero_page_x_wrap_around() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x00, 0xde);
+        /* INX -> LDA 0xff */
+        cpu.load_and_run(vec![0xe8, 0xb5, 0xff, 0x00]);
+        assert_eq!(cpu.register_a, 0xde);
+    }
+
+    #[test]
+    fn test_0xad_lda_absolute() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0xdead, 0xbe);
+        /* LDA 0xdead */
+        cpu.load_and_run(vec![0xad, 0xad, 0xde, 0x00]);
+        assert_eq!(cpu.register_a, 0xbe);
+    }
+
+    #[test]
+    fn test_0xbd_lda_absolute_x() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0xdeae, 0xbe);
+        /* INX -> LDA 0xdead */
+        cpu.load_and_run(vec![0xe8, 0xbd, 0xad, 0xde, 0x00]);
+        assert_eq!(cpu.register_a, 0xbe);
+    }
+
+    #[test]
+    fn test_0xb9_lda_absolute_y() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x5050, 0xbe);
+        /* LDY 0x50 -> LDA 0x5000 */
+        cpu.load_and_run(vec![0xa0, 0x50, 0xb9, 0x00, 0x50, 0x00]);
+        assert_eq!(cpu.register_a, 0xbe);
+    }
+
+    #[test]
+    fn test_0xa1_lda_indirect_x() {
+        let mut cpu = CPU::new();
+        /* save address of the expected value to 0x0055 */
+        cpu.mem_write_u16(0x0055, 0xdead);
+        /* save expected value to 0xdead */
+        cpu.mem_write(0xdead, 0xea);
+        /* LDX 0x05 -> LDA 0x50 => load LDA from the address stored at 0x0055 */
+        cpu.load_and_run(vec![0xa2, 0x05, 0xa1, 0x50, 0x00]);
+        assert_eq!(cpu.register_a, 0xea);
+    }
+
+    #[test]
+    fn test_0xb1_lda_indirect_y() {
+        let mut cpu = CPU::new();
+        /* save address of the expected value to 0x0050 */
+        cpu.mem_write_u16(0x0050, 0x5000);
+        /* save expected value to 0x5005 */
+        cpu.mem_write(0x5005, 0xea);
+        /* LDY 0x05 -> LDA 0x50 => load LDA from the (address stored at 0x50) + 0x05 */
+        cpu.load_and_run(vec![0xa0, 0x05, 0xb1, 0x50, 0x00]);
+        assert_eq!(cpu.register_a, 0xea);
+    }
+
 }
